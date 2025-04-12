@@ -29,6 +29,7 @@ export async function GET(request: Request) {
         status: invoice.status,
         createdAt: invoice.createdAt,
         updatedAt: invoice.updatedAt,
+        originalFileUrl: invoice.originalFileUrl,
         tokenUsage: {
           totalTokens: tokenUsage.totalTokens,
           cost: tokenUsage.cost,

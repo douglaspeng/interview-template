@@ -155,6 +155,25 @@ export function InvoiceChat() {
       
       const rawData = await response.json();
       console.log("raw",rawData);
+      
+      // Check if the document was not recognized as an invoice
+      if (rawData.extractionMethod === 'validation_failed') {
+        setMessages(prev => [
+          ...prev,
+          {
+            id: Date.now().toString(),
+            role: 'assistant',
+            content: 'I apologize, but this document does not appear to be a valid invoice. Please make sure you are uploading an invoice document.',
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        return;
+      }
+      
       // Check if the processing was successful
       if (rawData.processingErrors && rawData.processingErrors.length > 0) {
         console.warn('Invoice processing had errors:', rawData.processingErrors);

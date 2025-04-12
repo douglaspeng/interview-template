@@ -49,14 +49,13 @@ export function EditInvoiceDialog({ invoice, onClose, onSave }: EditInvoiceDialo
   // Update form data when invoice changes
   useEffect(() => {
     if (invoice) {
-        console.log(invoice);
       setFormData({
         customerName: invoice.customerName || '',
         vendorName: invoice.vendorName || '',
         invoiceNumber: invoice.invoiceNumber || '',
         invoiceDate: invoice.invoiceDate ? new Date(invoice.invoiceDate).toISOString().split('T')[0] : '',
         dueDate: invoice.dueDate ? new Date(invoice.dueDate).toISOString().split('T')[0] : '',
-        amount: invoice.amount || 0,
+        amount: invoice.amount || 0, // Keep amount in cents
         currency: invoice.currency || 'USD',
         originalFileUrl: invoice.originalFileUrl || '',
       });
@@ -88,6 +87,7 @@ export function EditInvoiceDialog({ invoice, onClose, onSave }: EditInvoiceDialo
         },
         body: JSON.stringify({
           ...formData,
+          amount: formData.amount, // Amount is already in cents
           invoiceDate: new Date(formData.invoiceDate),
           dueDate: formData.dueDate ? new Date(formData.dueDate) : null,
         }),
@@ -112,7 +112,7 @@ export function EditInvoiceDialog({ invoice, onClose, onSave }: EditInvoiceDialo
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'amount' ? parseFloat(value) || 0 : value,
+      [name]: name === 'amount' ? Math.round(parseFloat(value) * 100) || 0 : value, // Convert dollars to cents when user inputs
     }));
   };
 

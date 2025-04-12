@@ -67,6 +67,93 @@ function isImageFile(filePathOrUrl: string): boolean {
   return extension ? imageExtensions.includes(`.${extension}`) : false;
 }
 
+async function validateInvoiceWithGPT(text: string): Promise<boolean> {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+  
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert at identifying invoice documents. Your task is to determine if the provided text contains an invoice.
+          
+          Look for key indicators of an invoice such as:
+          - Invoice number or reference
+          - Billing information
+          - Line items or charges
+          - Total amount
+          - Payment terms
+          - Vendor/Supplier information
+          
+          Respond with a JSON object containing:
+          {
+            "isInvoice": boolean,
+            "confidence": number (0-1),
+            "reason": string (brief explanation of your decision)
+          }`
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const content = completion.choices[0].message.content;
+    if (!content) {
+      throw new Error('No content returned from OpenAI API');
+    }
+
+    const result = JSON.parse(content);
+    return result.isInvoice;
+  } catch (error) {
+    console.error('Error validating invoice:', error);
+    return false;
+  }
+}
+
+async function extractTextFromImage(buffer: Buffer): Promise<string> {
+  const openai = new OpenAI({
+    apiKey: process.env.OPENAI_API_KEY,
+  });
+  
+  try {
+    // Convert buffer to base64
+    const base64Image = buffer.toString('base64');
+    
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "Please extract all text from this image. Include any numbers, dates, and text you can find."
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${base64Image}`
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 1000
+    });
+
+    return completion.choices[0].message.content || '';
+  } catch (error) {
+    console.error('Error extracting text from image:', error);
+    return '';
+  }
+}
+
 export async function processInvoice(filePathOrUrl: string, forceNoCache = false): Promise<StructuredData> {
   console.log(`Processing invoice from: ${filePathOrUrl}`);
   
@@ -88,8 +175,31 @@ export async function processInvoice(filePathOrUrl: string, forceNoCache = false
   
   console.log(`File loaded successfully, size: ${buffer.byteLength} bytes`);
   
+  // Extract text for validation
+  const extractedText = isImageFile(filePathOrUrl) 
+    ? await extractTextFromImage(buffer)
+    : await extractTextFromPDF(buffer);
+  
+  // Validate if the document is an invoice
+  const isValidInvoice = await validateInvoiceWithGPT(extractedText);
+  if (!isValidInvoice) {
+    return {
+      customerName: "[Not an Invoice]",
+      vendorName: "[Not an Invoice]",
+      invoiceNumber: "[Not an Invoice]",
+      invoiceDate: new Date(),
+      dueDate: null,
+      amount: 0,
+      currency: "USD",
+      confidence: 0,
+      extractionMethod: "validation_failed",
+      processingErrors: ["The document does not appear to be a valid invoice"],
+      originalFileUrl: filePathOrUrl
+    };
+  }
+  
   // Check if we have a cached result
-  const cacheKey = isImageFile(filePathOrUrl) ? filePathOrUrl : await extractTextFromPDF(buffer);
+  const cacheKey = isImageFile(filePathOrUrl) ? filePathOrUrl : extractedText;
   console.log("forceNoCache", forceNoCache);
   const cachedResult = await getCachedPrompt(cacheKey);
   console.log("cachedResult", cachedResult);
@@ -118,7 +228,7 @@ export async function processInvoice(filePathOrUrl: string, forceNoCache = false
   // Process with OpenAI based on file type
   const result = isImageFile(filePathOrUrl)
     ? await processImageWithOpenAI(filePathOrUrl)
-    : await processTextWithOpenAI(await extractTextFromPDF(buffer), filePathOrUrl);
+    : await processTextWithOpenAI(extractedText, filePathOrUrl);
   
   console.log("no cache");
   console.log(result);
